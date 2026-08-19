@@ -87,6 +87,7 @@ assert.ok(Object.keys(registeredDicts.en).length >= 20, 'dictionary is not a stu
 const injected = registeredOptions.inject()
 assert.equal(typeof injected.api.state, 'function')
 assert.equal(typeof injected.api.setEnabled, 'function')
+assert.equal(typeof injected.api.installCommunity, 'function')
 assert.equal(typeof injected.api.restart, 'function')
 
 console.log('client: bundle contract, slot wiring, api face, zh/en parity — ok')

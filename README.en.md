@@ -5,8 +5,8 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plug
 ## Features
 
 - **Restart dsh web** — one button restarts the host web process. The restarter is a detached helper that polls until the port is actually released (up to 20 s) before relaunching, so a slow-shutting-down old process cannot make the new one die with `EADDRINUSE`; the new instance inherits the original terminal's stdio and the page reloads itself once the server is back.
-- **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart.
-- **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise it shows guidance plus the GitHub [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic link.
+- **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart. Plugins installed from a local checkout (`link:`/`file:` specs) additionally show git metadata when it is already present on disk — **local build** vs **local branch**, the current branch, the first remote's name/URL (e.g. `Local branch · origin/main · https://github.com/dujar/dsh-pocket.git`) — read from `.git` only, no network, worktrees included.
+- **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise the card advertises **dujar/dsh-community-plugin** with a one-click install (runs `dsh plugin --profile <p> add github:dujar/dsh-community-plugin`) and a link to the repository.
 - **Fail-closed trust guard** — all routes reuse the same-origin/localhost check shared with dsh-trader and dsh-community-plugins.
 
 ## Screenshots
@@ -48,8 +48,9 @@ Then **restart `dsh web`** and refresh the browser page. The install adds `dsh-r
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/dsh-restart/state` | profile, installed plugins (with enabled state), dsh-community-plugins availability |
+| GET | `/dsh-restart/state` | profile, installed plugins (with enabled state + local git metadata), dsh-community-plugins availability |
 | POST | `/dsh-restart/plugin` | `{ name, enabled }` — add/remove a `dsh.profile.bundles` entry |
+| POST | `/dsh-restart/community` | one-click install of `github:dujar/dsh-community-plugin` (`DSH_BIN` overrides the executable) |
 | POST | `/dsh-restart` | schedule a self-restart; responds `{ ok, restarting }`, then the process exits ~400 ms later |
 
 All routes use the fail-closed same-origin/localhost trust check shared with dsh-trader and dsh-community-plugins: a cross-origin or malformed `Origin`/`Referer` rejects, a CORS-simple content type rejects, and only then does a localhost host count as trusted.
