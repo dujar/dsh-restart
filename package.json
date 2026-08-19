@@ -1,0 +1,76 @@
+{
+  "name": "dsh-restart",
+  "description": "Restart dsh web from Settings → Restart, enable/disable installed plugins with one toggle, and jump to the Community plugins tab to install more. Bilingual (English/中文) UI. 在 设置 → 重启 中一键重启 dsh web、开关已安装插件，并跳转社区插件页安装更多。",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "dshhub": {
+    "schemaVersion": 1,
+    "displayName": "dsh-restart",
+    "summary": "Settings → Restart: restart dsh web in one click, toggle installed plugins on/off, and jump to the Community plugins tab to install more.",
+    "categories": [
+      "系统",
+      "Web UI"
+    ],
+    "surfaces": [
+      "host",
+      "web"
+    ],
+    "capabilities": {
+      "provides": [
+        "service:restart"
+      ]
+    },
+    "compatibility": {
+      "dsh": ">=0.1.0-rc.5",
+      "node": ">=20"
+    },
+    "permissions": {}
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "scripts": {
+    "test": "node test/host.test.mjs && node test/client.test.mjs && node test/render.test.mjs"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "client-plugin",
+    "restart",
+    "plugin-manager",
+    "i18n",
+    "bilingual",
+    "zh",
+    "en"
+  ],
+  "license": "MIT",
+  "author": "bitslicer",
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0",
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}
