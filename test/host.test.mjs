@@ -1,7 +1,7 @@
 // Host-half tests for dsh-restart: state listing, plugin enable/disable,
 // restart scheduling (with the spawn/exit stubbed so no real process is
 // spawned and the test runner survives), and the trust guard.
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -509,11 +509,24 @@ try {
 
 // ---- POST /dsh-restart/reinstall -----------------------------------------------
 const reinstallSpawns = []
+const relinkSpawns = []
 mod._setGitInternals({
   spawn(bin, args) {
     reinstallSpawns.push(args)
     return {
       stdout: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('done\n')) } },
+      stderr: { on: () => {} },
+      on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+    }
+  },
+})
+// The reinstall route auto-repairs a broken link (web2 has no node_modules at
+// all, so every link: entry reads as missing) — stub the dsh spawn it uses.
+mod._setInstallInternals({
+  spawn(bin, args) {
+    relinkSpawns.push(args)
+    return {
+      stdout: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('ok\n')) } },
       stderr: { on: () => {} },
       on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
     }
@@ -529,8 +542,14 @@ try {
       ['-C', pluginAPath, 'reset', '--hard'],
       ['-C', pluginAPath, 'clean', '-fdx'],
     ], 'local source resets the checkout and cleans')
+    const body = JSON.parse(res.body)
+    assert.deepEqual(body.deps, { status: 'skipped', reason: 'no package.json' }, 'no package.json means deps restore is skipped')
+    assert.equal(body.relink.attempted, true, 'a broken link triggers the auto-repair')
+    assert.equal(body.relink.ok, true)
+    assert.deepEqual(relinkSpawns, [['plugin', '--profile', 'web2', 'install']], 'repair re-syncs the profile install')
   }
   reinstallSpawns.length = 0
+  relinkSpawns.length = 0
   {
     const res = fakeRes()
     await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'origin' }), res)
@@ -541,7 +560,9 @@ try {
       ['-C', pluginAPath, 'checkout', '-B', 'main'],
       ['-C', pluginAPath, 'clean', '-fdx'],
     ], 'remote source fetches, hard-resets to its default branch, and cleans')
+    assert.deepEqual(relinkSpawns, [['plugin', '--profile', 'web2', 'install']], 'remote source auto-repairs the link too')
   }
+  relinkSpawns.length = 0
   {
     const res = fakeRes()
     await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'nowhere' }), res)
@@ -560,6 +581,7 @@ try {
 } finally {
   delete process.env.DSH_RESTART_PROFILE
   mod._resetGitInternals()
+  mod._resetInstallInternals()
 }
 
 // a failing reinstall step aborts with its stderr
@@ -586,6 +608,300 @@ try {
   } finally {
     delete process.env.DSH_RESTART_PROFILE
     mod._resetGitInternals()
+  }
+}
+
+// ---- link health in state (web4 healthy, web5 broken) -------------------------
+const web4 = join(tmp, 'profiles', 'web4')
+const web5 = join(tmp, 'profiles', 'web5')
+mkdirSync(join(web4, 'node_modules'), { recursive: true })
+mkdirSync(join(web5, 'node_modules'), { recursive: true })
+const pluginBPath = join(pluginsDir, 'plugin-b')
+const pluginCPath = join(pluginsDir, 'plugin-c')
+symlinkSync(pluginAPath, join(web4, 'node_modules', 'plugin-a'))
+symlinkSync(pluginCPath, join(web4, 'node_modules', 'plugin-c'))
+symlinkSync(pluginCPath, join(web5, 'node_modules', 'plugin-a'))
+mkdirSync(join(web5, 'node_modules', 'plugin-b'))
+symlinkSync(join(pluginsDir, 'gone'), join(web5, 'node_modules', 'plugin-d'))
+writeFileSync(join(web4, 'package.json'), JSON.stringify({
+  name: 'dsh-profile-web4',
+  private: true,
+  dsh: { profile: { bundles: ['dsh-restart', 'plugin-a', 'plugin-c', 'dsh-plain'] } },
+  dependencies: {
+    'plugin-a': 'link:' + pluginAPath,
+    'plugin-c': 'file:' + pluginCPath,
+    'dsh-plain': '^1.0.0',
+  },
+}, null, 2) + '\n')
+writeFileSync(join(web5, 'package.json'), JSON.stringify({
+  name: 'dsh-profile-web5',
+  private: true,
+  dsh: { profile: { bundles: ['dsh-restart', 'plugin-a', 'plugin-b', 'plugin-d'] } },
+  dependencies: {
+    'plugin-a': 'link:' + pluginAPath,
+    'plugin-b': 'link:' + pluginBPath,
+    'plugin-d': 'link:' + join(pluginsDir, 'gone'),
+  },
+}, null, 2) + '\n')
+
+process.env.DSH_RESTART_PROFILE = 'web4'
+try {
+  const res = fakeRes()
+  await routes['/dsh-restart/state'].handler(fakeReq('GET', local), res)
+  const byName = Object.fromEntries(JSON.parse(res.body).plugins.map((p) => [p.name, p]))
+  assert.deepEqual(byName['plugin-a'].link, { ok: true }, 'link: symlink matching the checkout is healthy')
+  assert.deepEqual(byName['plugin-c'].link, { ok: true }, 'a present file: entry counts as healthy')
+  assert.equal(byName['dsh-plain'].link, null, 'registry specs carry no link health')
+  assert.equal(byName['dsh-restart'].link, null)
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+}
+process.env.DSH_RESTART_PROFILE = 'web5'
+try {
+  const res = fakeRes()
+  await routes['/dsh-restart/state'].handler(fakeReq('GET', local), res)
+  const byName = Object.fromEntries(JSON.parse(res.body).plugins.map((p) => [p.name, p]))
+  assert.deepEqual(byName['plugin-a'].link, { ok: false, reason: 'mismatch' }, 'a symlink pointing elsewhere is a mismatch')
+  assert.deepEqual(byName['plugin-b'].link, { ok: false, reason: 'dir' }, 'a real directory entry is broken')
+  assert.deepEqual(byName['plugin-d'].link, { ok: false, reason: 'dangling' }, 'a symlink to a missing target is dangling')
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+}
+assert.deepEqual(await mod.linkHealthOf('web2', 'plugin-a', 'link:' + pluginAPath), { ok: false, reason: 'missing' }, 'no node_modules entry reads as missing')
+
+// ---- restoreDeps: package-manager detection + results -------------------------
+const depsCheckout = join(tmp, 'deps-checkout')
+mkdirSync(depsCheckout, { recursive: true })
+const depsSpawns = []
+mod._setDepsInternals({
+  spawn(bin, args, opts) {
+    depsSpawns.push({ bin, args, opts })
+    return {
+      stdout: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('ok\n')) } },
+      stderr: { on: () => {} },
+      on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+    }
+  },
+})
+try {
+  {
+    writeFileSync(join(depsCheckout, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '^1' } }))
+    writeFileSync(join(depsCheckout, 'package-lock.json'), '{}')
+    writeFileSync(join(depsCheckout, 'pnpm-lock.yaml'), '')
+    const result = await mod.restoreDeps(depsCheckout)
+    assert.equal(result.status, 'installed')
+    assert.equal(depsSpawns.length, 1)
+    assert.equal(depsSpawns[0].bin, process.env.NPM_BIN || 'npm', 'package-lock.json wins -> npm')
+    assert.deepEqual(depsSpawns[0].args, ['install'])
+    assert.equal(depsSpawns[0].opts.cwd, depsCheckout, 'install runs inside the checkout')
+  }
+  depsSpawns.length = 0
+  {
+    rmSync(join(depsCheckout, 'package-lock.json'))
+    const result = await mod.restoreDeps(depsCheckout)
+    assert.equal(result.status, 'installed')
+    assert.equal(depsSpawns[0].bin, process.env.PNPM_BIN || 'pnpm', 'pnpm-lock.yaml alone picks pnpm')
+  }
+  depsSpawns.length = 0
+  {
+    rmSync(join(depsCheckout, 'pnpm-lock.yaml'))
+    const result = await mod.restoreDeps(depsCheckout)
+    assert.equal(result.status, 'installed')
+    assert.equal(depsSpawns[0].bin, process.env.NPM_BIN || 'npm', 'deps without a lockfile fall back to npm')
+  }
+  depsSpawns.length = 0
+  {
+    writeFileSync(join(depsCheckout, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0' }))
+    const result = await mod.restoreDeps(depsCheckout)
+    assert.equal(result.status, 'skipped')
+    assert.equal(depsSpawns.length, 0, 'no dependencies means no install')
+  }
+  depsSpawns.length = 0
+  {
+    rmSync(join(depsCheckout, 'package.json'))
+    const result = await mod.restoreDeps(depsCheckout)
+    assert.equal(result.status, 'skipped')
+    assert.equal(result.reason, 'no package.json')
+  }
+} finally {
+  mod._resetDepsInternals()
+}
+// a failing dependency install surfaces stderr, not an exception
+mod._setDepsInternals({
+  spawn() {
+    return {
+      stdout: { on: () => {} },
+      stderr: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('ERR! not found')) } },
+      on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(1), 5) },
+    }
+  },
+})
+{
+  writeFileSync(join(depsCheckout, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', dependencies: { a: '^1' } }))
+  const result = await mod.restoreDeps(depsCheckout)
+  assert.equal(result.status, 'failed')
+  assert.match(result.error, /not found/)
+}
+mod._resetDepsInternals()
+
+// ---- POST /dsh-restart/relink ------------------------------------------------
+let relinkCaptured = null
+process.env.DSH_BIN = 'dsh-test'
+mod._setInstallInternals({
+  spawn(bin, args, opts) {
+    relinkCaptured = { bin, args, opts }
+    return stubSpawn('relinked ok', '', 0)(bin, args, opts)
+  },
+})
+process.env.DSH_RESTART_PROFILE = 'web4'
+try {
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', local, '/dsh-restart/relink', { name: 'plugin-a' }), res)
+    assert.equal(res.status, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.ok, true)
+    assert.equal(body.output, 'relinked ok')
+    assert.equal(relinkCaptured.bin, 'dsh-test', 'DSH_BIN overrides the executable')
+    assert.deepEqual(relinkCaptured.args, ['plugin', '--profile', 'web4', 'install'])
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', local, '/dsh-restart/relink', { name: '@deepseek-ai/foo' }), res)
+    assert.equal(res.status, 400, 'builtins cannot be relinked')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', local, '/dsh-restart/relink', { name: 'nope' }), res)
+    assert.equal(res.status, 404, 'not installed')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', local, '/dsh-restart/relink', { name: 'dsh-plain' }), res)
+    assert.equal(res.status, 400, 'registry spec is not a local plugin')
+  }
+  {
+    relinkCaptured = null
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', evil, '/dsh-restart/relink', { name: 'plugin-a' }), res)
+    assert.equal(res.status, 403)
+    assert.equal(relinkCaptured, null, 'untrusted request never spawns')
+  }
+  {
+    mod._setInstallInternals({ spawn: stubSpawn('', 'pnpm failed', 1) })
+    const res = fakeRes()
+    await routes['/dsh-restart/relink'].handler(fakeReq('POST', local, '/dsh-restart/relink', { name: 'plugin-a' }), res)
+    assert.equal(res.status, 500)
+    assert.match(JSON.parse(res.body).error, /pnpm failed/)
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+  mod._resetInstallInternals()
+  if (prevBin === undefined) delete process.env.DSH_BIN
+  else process.env.DSH_BIN = prevBin
+}
+
+// ---- reinstall from the plugin origin (remote: 'plugin') ----------------------
+process.env.DSH_BIN = 'dsh-test'
+process.env.DSH_RESTART_PROFILE = 'web4'
+try {
+  {
+    mod._setInstallInternals({
+      spawn(bin, args, opts) {
+        relinkCaptured = { bin, args, opts }
+        return stubSpawn('added ok', '', 0)(bin, args, opts)
+      },
+    })
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'plugin' }), res)
+    assert.equal(res.status, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.ok, true)
+    assert.equal(body.unlinked, true)
+    assert.equal(body.checkout, pluginAPath, 'the checkout path is reported, never deleted')
+    assert.deepEqual(relinkCaptured.args, ['plugin', '--profile', 'web4', 'add', 'plugin-a@latest'])
+    assert.ok(readFileSync(join(pluginAPath, '.git', 'HEAD'), 'utf8').includes('feature/x'), 'checkout on disk is untouched')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'dsh-plain', remote: 'plugin' }), res)
+    assert.equal(res.status, 400, 'a registry dep has no local checkout to de-link')
+  }
+  {
+    relinkCaptured = null
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', evil, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'plugin' }), res)
+    assert.equal(res.status, 403)
+    assert.equal(relinkCaptured, null)
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+  mod._resetInstallInternals()
+  if (prevBin === undefined) delete process.env.DSH_BIN
+  else process.env.DSH_BIN = prevBin
+}
+
+// ---- auto-repair edge cases ---------------------------------------------------
+// healthy link: no repair spawn
+{
+  mod._setGitInternals({
+    spawn() {
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+      }
+    },
+  })
+  let installSpawned = false
+  mod._setInstallInternals({
+    spawn() {
+      installSpawned = true
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+      }
+    },
+  })
+  process.env.DSH_RESTART_PROFILE = 'web4'
+  try {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(JSON.parse(res.body).relink, { attempted: false }, 'a healthy link needs no repair')
+    assert.equal(installSpawned, false)
+  } finally {
+    delete process.env.DSH_RESTART_PROFILE
+    mod._resetGitInternals()
+    mod._resetInstallInternals()
+  }
+}
+// broken link whose repair fails still reports success with relink.ok:false
+{
+  mod._setGitInternals({
+    spawn() {
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+      }
+    },
+  })
+  mod._setInstallInternals({ spawn: stubSpawn('', 'ERR_PNPM_LOCKFILE_MISMATCH', 1) })
+  process.env.DSH_RESTART_PROFILE = 'web5'
+  try {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-b' }), res)
+    assert.equal(res.status, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.relink.attempted, true)
+    assert.equal(body.relink.ok, false)
+    assert.match(body.relink.error, /LOCKFILE/)
+  } finally {
+    delete process.env.DSH_RESTART_PROFILE
+    mod._resetGitInternals()
+    mod._resetInstallInternals()
   }
 }
 

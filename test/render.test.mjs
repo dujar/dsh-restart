@@ -140,6 +140,44 @@ assert.ok(!buildRowHtml.includes('dshrt-git-divider'), 'reinstall panel closed b
   assert.ok(row.includes('Local branch · origin/main · https://github.com/a/b.git'), 'local line rendered')
 }
 
+// Broken link: warning bar + repair button render (en + zh); healthy renders none.
+{
+  const brokenPlugin = {
+    name: 'dsh-pocket',
+    enabled: true,
+    local: { path: '/home/x/dsh-pocket', git: true, branch: 'main', remoteName: null, remoteUrl: null },
+    link: { ok: false, reason: 'dir' },
+  }
+  const row = ReactDOMServer.renderToString(React.createElement(mod.PluginRow, {
+    t: (k) => dicts.en[k] ?? k,
+    api: { relink: async () => ({ ok: true }) },
+    plugin: brokenPlugin,
+    onRefresh: () => {},
+    onNotice: () => {},
+  }))
+  assert.ok(row.includes('Link broken'), 'en link warning rendered')
+  assert.ok(row.includes('node_modules entry is a real directory'), 'en broken reason rendered')
+  assert.ok(row.includes('Repair link'), 'repair button rendered')
+  assert.ok(row.includes('dshrt-linkwarn'), 'warning carries the class')
+  const rowZh = ReactDOMServer.renderToString(React.createElement(mod.PluginRow, {
+    t: (k) => dicts.zh[k] ?? k,
+    api: { relink: async () => ({ ok: true }) },
+    plugin: brokenPlugin,
+    onRefresh: () => {},
+    onNotice: () => {},
+  }))
+  assert.ok(rowZh.includes('链接已断开'), 'zh link warning rendered')
+  assert.ok(rowZh.includes('修复链接'), 'zh repair button rendered')
+  const healthyRow = ReactDOMServer.renderToString(React.createElement(mod.PluginRow, {
+    t: (k) => dicts.en[k] ?? k,
+    api: {},
+    plugin: { ...brokenPlugin, link: { ok: true } },
+    onRefresh: () => {},
+    onNotice: () => {},
+  }))
+  assert.ok(!healthyRow.includes('dshrt-linkwarn'), 'healthy link renders no warning')
+}
+
 assert.equal(mod.localLine((k) => dicts.en[k] ?? k, { git: true, branch: 'wip', remoteName: null, remoteUrl: null }), 'Local branch · wip (no remote)')
 
 console.log('render: section component server-renders in en and zh — ok')

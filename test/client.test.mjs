@@ -31,6 +31,19 @@ assert.equal(mod.name, 'dsh-restart')
 assert.deepEqual(mod.inject, ['slots', 'locale'])
 assert.equal(typeof mod.apply, 'function')
 
+// Native <select> popup theming: the select AND its options must carry the
+// system's opaque layer token (a translucent background paints the popup
+// canvas near-white and hides light option text), and colorScheme must follow
+// the host's data-ds-dark-theme attribute.
+assert.ok(Array.isArray(mod.styles), 'styles are exported for theming checks')
+const selectRule = mod.styles.find((s) => s.indexOf('.dshrt-git-select{') !== -1)
+const optionRule = mod.styles.find((s) => s.indexOf('.dshrt-git-select option') !== -1)
+const schemeRule = mod.styles.find((s) => s.indexOf('[data-ds-dark-theme] .dshrt-git-select') !== -1)
+assert.ok(selectRule, 'select rule present')
+assert.ok(selectRule.indexOf('var(--dsw-alias-bg-layer-1') !== -1, 'select uses the opaque system layer token')
+assert.ok(optionRule && optionRule.indexOf('var(--dsw-alias-bg-layer-1') !== -1, 'options repeat the opaque pair')
+assert.ok(schemeRule, 'popup colorScheme follows the dark theme attribute')
+
 let registeredDicts = null
 let injectedSlot = null
 let registeredOptions = null
@@ -91,8 +104,19 @@ assert.equal(typeof injected.api.installCommunity, 'function')
 assert.equal(typeof injected.api.gitRefs, 'function')
 assert.equal(typeof injected.api.gitCheckout, 'function')
 assert.equal(typeof injected.api.uninstall, 'function')
+assert.equal(typeof injected.api.relink, 'function')
 assert.equal(typeof injected.api.reinstall, 'function')
 assert.equal(typeof injected.api.restart, 'function')
+
+// Reinstall sources: Local, each named git remote, then Plugin (npm).
+const srcT = (key) => 'T:' + key
+assert.deepEqual(mod.reinstallSourceOptions(srcT, null).map((o) => o.value), ['local', 'plugin'], 'no remotes: Local + Plugin')
+assert.deepEqual(
+  mod.reinstallSourceOptions(srcT, { remotes: [{ name: 'origin', url: 'https://github.com/a/b' }] }).map((o) => o.value),
+  ['local', 'origin', 'plugin'],
+  'named remotes sit between Local and Plugin',
+)
+assert.equal(mod.reinstallSourceOptions(srcT, null).at(-1).label, 'T:reinstallPluginSource', 'plugin option carries the translated label')
 
 
 // ---- pollRestart: the two-phase handoff that actually reloads the page ----
