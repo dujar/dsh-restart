@@ -117,6 +117,29 @@ const buildRowHtml = ReactDOMServer.renderToString(
   }),
 )
 assert.ok(buildRowHtml.includes('Local build'), 'plain local dir renders as local build')
+assert.ok(buildRowHtml.includes('>Uninstall<'), 'uninstall button renders')
+assert.ok(!buildRowHtml.includes('dshrt-git-divider'), 'reinstall panel closed by default')
+// PluginRow with a git checkout renders the switch-branch chip (panel closed
+// by default) and the local line.
+{
+  // A component is called through createElement — calling PluginRow(props)
+  // directly returns an element tree, not a string, and renderToString was
+  // never bound in this file.
+  const row = ReactDOMServer.renderToString(React.createElement(mod.PluginRow, {
+    t: (k) => dicts.en[k] ?? k,
+    api: {},
+    plugin: {
+      name: 'dsh-x',
+      enabled: true,
+      local: { git: true, branch: 'main', remoteName: 'origin', remoteUrl: 'https://github.com/a/b.git', path: '/tmp/x' },
+    },
+    onRefresh: () => {},
+  }))
+  assert.ok(row.includes('Switch branch'), 'git switch chip rendered')
+  assert.ok(!row.includes('dshrt-git"'), 'panel is closed by default')
+  assert.ok(row.includes('Local branch · origin/main · https://github.com/a/b.git'), 'local line rendered')
+}
+
 assert.equal(mod.localLine((k) => dicts.en[k] ?? k, { git: true, branch: 'wip', remoteName: null, remoteUrl: null }), 'Local branch · wip (no remote)')
 
 console.log('render: section component server-renders in en and zh — ok')

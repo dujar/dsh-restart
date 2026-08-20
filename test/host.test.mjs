@@ -30,13 +30,17 @@ const mod = await import('../lib/index.js')
 const routes = {}
 mod.apply({ effect: (fn) => { fn(); return () => {} }, webServer: { register: (def) => { routes[def.path] = def; return () => {} } } })
 
-function fakeReq(method, headers, body) {
+function fakeReq(method, headers, url, body) {
+  if (typeof url === 'object' && url !== null || typeof url === 'string' && url.startsWith('{')) {
+    body = url
+    url = '/'
+  }
   return {
     method,
     headers,
-    url: '/',
+    url: url || '/',
     on(event, cb) {
-      if (event === 'data' && body) cb(Buffer.from(body))
+      if (event === 'data' && body) cb(Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)))
       if (event === 'end') cb()
     },
   }
@@ -240,10 +244,20 @@ else process.env.DSH_BIN = prevBin
 
 // ---- local git metadata -------------------------------------------------------
 const pluginsDir = join(tmp, 'plugins')
-mkdirSync(join(pluginsDir, 'plugin-a', '.git'), { recursive: true })
+mkdirSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'heads', 'feature'), { recursive: true })
+mkdirSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'remotes', 'origin'), { recursive: true })
+mkdirSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'remotes', 'upstream'), { recursive: true })
 writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'HEAD'), 'ref: refs/heads/feature/x\n')
+writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'heads', 'main'), 'a'.repeat(40) + '\n')
+writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'heads', 'feature', 'x'), 'b'.repeat(40) + '\n')
+writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'remotes', 'origin', 'main'), 'c'.repeat(40) + '\n')
+writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'remotes', 'origin', 'dev'), 'd'.repeat(40) + '\n')
+writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'refs', 'remotes', 'upstream', 'main'), 'e'.repeat(40) + '\n')
 writeFileSync(join(pluginsDir, 'plugin-a', '.git', 'config'),
-  '[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = git@github.com:acme/plugin-a.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n')
+  '[core]\n\trepositoryformatversion = 0\n' +
+  '[remote "origin"]\n\turl = git@github.com:acme/plugin-a.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' +
+  '[remote "upstream"]\n\turl = https://github.com/acme/plugin-a-upstream\n\tfetch = +refs/heads/*:refs/remotes/upstream/*\n' +
+  '[branch "feature/x"]\n\tremote = origin\n\tmerge = refs/heads/feature/x\n')
 // worktree: .git is a file pointing at a separate gitdir
 mkdirSync(join(pluginsDir, 'plugin-b'), { recursive: true })
 mkdirSync(join(pluginsDir, 'plugin-b-git'), { recursive: true })
@@ -289,6 +303,292 @@ try {
   delete process.env.DSH_RESTART_PROFILE
 }
 
+// ---- GET /dsh-restart/git-refs -------------------------------------------------
+process.env.DSH_RESTART_PROFILE = 'web2'
+try {
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', local, '/dsh-restart/git-refs?name=plugin-a'), res)
+    assert.equal(res.status, 200)
+    const body = JSON.parse(res.body)
+    assert.equal(body.ok, true)
+    assert.equal(body.head, 'feature/x')
+    assert.deepEqual(body.local, ['feature/x', 'main'])
+    assert.equal(body.remotes.length, 2, 'both remotes listed')
+    assert.equal(body.remotes[0].name, 'origin')
+    assert.equal(body.remotes[0].url, 'git@github.com:acme/plugin-a.git')
+    assert.deepEqual(body.remotes[0].branches, ['dev', 'main'])
+    assert.equal(body.remotes[1].name, 'upstream')
+    assert.deepEqual(body.remotes[1].branches, ['main'])
+    assert.deepEqual(body.tracked, { remote: 'origin', branch: 'feature/x' })
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', local, '/dsh-restart/git-refs?name=plugin-b'), res)
+    assert.equal(JSON.parse(res.body).ok, true, 'worktree gitdir refs resolve')
+    assert.equal(JSON.parse(res.body).head, 'main')
+    assert.equal(JSON.parse(res.body).remotes[0].name, 'upstream')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', local, '/dsh-restart/git-refs?name=plugin-c'), res)
+    assert.equal(res.status, 404)
+    assert.match(JSON.parse(res.body).error, /not a git checkout/)
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', local, '/dsh-restart/git-refs?name=dsh-restart'), res)
+    assert.equal(res.status, 404)
+    assert.match(JSON.parse(res.body).error, /not a local plugin/)
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', local, '/dsh-restart/git-refs'), res)
+    assert.equal(res.status, 400)
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-refs'].handler(fakeReq('GET', evil, '/dsh-restart/git-refs?name=plugin-a'), res)
+    assert.equal(res.status, 403)
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+}
+
+// ---- POST /dsh-restart/git-checkout --------------------------------------------
+const pluginAPath = join(pluginsDir, 'plugin-a')
+let gitSpawned = null
+mod._setGitInternals({
+  spawn(bin, args, opts) {
+    gitSpawned = { bin, args, opts }
+    return {
+      stdout: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('Switched to branch "main"\n')) } },
+      stderr: { on: () => {} },
+      on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+    }
+  },
+})
+process.env.DSH_RESTART_PROFILE = 'web2'
+try {
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'main' }), res)
+    assert.equal(res.status, 200)
+    assert.equal(JSON.parse(res.body).ok, true)
+    assert.deepEqual(gitSpawned.args, ['-C', pluginAPath, 'checkout', 'main'], 'plain local checkout')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'main', remote: 'origin' }), res)
+    assert.deepEqual(gitSpawned.args, ['-C', pluginAPath, 'checkout', 'main'], 'remote branch that exists locally checks out directly')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'dev', remote: 'origin' }), res)
+    assert.deepEqual(gitSpawned.args, ['-C', pluginAPath, 'checkout', '-b', 'dev', 'origin/dev'], 'remote branch without local ref creates tracking branch')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: '-rf' }), res)
+    assert.equal(res.status, 400, 'option-like branch names rejected')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'feature/x', remote: 'upstream' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(gitSpawned.args, ['-C', pluginAPath, 'branch', '--set-upstream-to', 'upstream/feature/x', 'feature/x'],
+      'same branch name from a different remote retargets the upstream')
+  }
+  {
+    gitSpawned = null
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'feature/x', remote: 'origin' }), res)
+    assert.equal(res.status, 200)
+    assert.equal(JSON.parse(res.body).noop, true, 'already tracking that remote is a no-op')
+    assert.equal(gitSpawned, null, 'no git spawned for a no-op')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'feature/x' }), res)
+    assert.deepEqual(gitSpawned.args, ['-C', pluginAPath, 'branch', '--unset-upstream', 'feature/x'],
+      'current branch back to local unsets the upstream')
+  }
+  {
+    gitSpawned = null
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-b', branch: 'main' }), res)
+    assert.equal(res.status, 200)
+    assert.equal(JSON.parse(res.body).noop, true, 'an untracked current branch is already local')
+    assert.equal(gitSpawned, null)
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-c', branch: 'main' }), res)
+    assert.equal(res.status, 404, 'non-git local dir rejected')
+  }
+  {
+    gitSpawned = null
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', evil, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'main' }), res)
+    assert.equal(res.status, 403, 'untrusted checkout rejected')
+    assert.equal(gitSpawned, null, 'git never spawned for untrusted request')
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+  mod._resetGitInternals()
+}
+
+// failing git run surfaces stderr
+{
+  mod._setGitInternals({
+    spawn() {
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('error: your local changes would be overwritten by checkout')) } },
+        on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(1), 5) },
+      }
+    },
+  })
+  process.env.DSH_RESTART_PROFILE = 'web2'
+  try {
+    const res = fakeRes()
+    await routes['/dsh-restart/git-checkout'].handler(fakeReq('POST', local, '/dsh-restart/git-checkout', { name: 'plugin-a', branch: 'main' }), res)
+    assert.equal(res.status, 500)
+    assert.equal(JSON.parse(res.body).ok, false)
+    assert.match(JSON.parse(res.body).error, /local changes/)
+  } finally {
+    delete process.env.DSH_RESTART_PROFILE
+    mod._resetGitInternals()
+  }
+}
+
+// ---- POST /dsh-restart/uninstall -----------------------------------------------
+const web3 = join(tmp, 'profiles', 'web3')
+mkdirSync(web3, { recursive: true })
+writeFileSync(join(web3, 'package.json'), JSON.stringify({
+  name: 'dsh-profile-web3',
+  private: true,
+  dsh: { profile: { bundles: ['dsh-restart', 'dsh-better-archive'] } },
+  dependencies: { 'dsh-better-archive': 'link:' + join(pluginsDir, 'plugin-c') },
+}, null, 2) + '\n')
+process.env.DSH_RESTART_PROFILE = 'web3'
+try {
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/uninstall'].handler(fakeReq('POST', local, '/dsh-restart/uninstall', { name: 'dsh-better-archive' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(JSON.parse(res.body).removed, { bundles: true, deps: true })
+    const manifest = JSON.parse(readFileSync(join(web3, 'package.json'), 'utf8'))
+    assert.ok(!manifest.dsh.profile.bundles.includes('dsh-better-archive'), 'removed from bundles')
+    assert.equal(manifest.dependencies['dsh-better-archive'], undefined, 'removed from dependencies')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/uninstall'].handler(fakeReq('POST', local, '/dsh-restart/uninstall', { name: 'dsh-restart' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(JSON.parse(res.body).removed, { bundles: true, deps: false }, 'bundles-only removal')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/uninstall'].handler(fakeReq('POST', local, '/dsh-restart/uninstall', { name: 'nope' }), res)
+    assert.equal(res.status, 404, 'not installed')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/uninstall'].handler(fakeReq('POST', local, '/dsh-restart/uninstall', { name: '@deepseek-ai/foo' }), res)
+    assert.equal(res.status, 400, 'builtins cannot be uninstalled')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/uninstall'].handler(fakeReq('POST', evil, '/dsh-restart/uninstall', { name: 'dsh-restart' }), res)
+    assert.equal(res.status, 403)
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+}
+
+// ---- POST /dsh-restart/reinstall -----------------------------------------------
+const reinstallSpawns = []
+mod._setGitInternals({
+  spawn(bin, args) {
+    reinstallSpawns.push(args)
+    return {
+      stdout: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('done\n')) } },
+      stderr: { on: () => {} },
+      on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(0), 5) },
+    }
+  },
+})
+process.env.DSH_RESTART_PROFILE = 'web2'
+try {
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(reinstallSpawns, [
+      ['-C', pluginAPath, 'reset', '--hard'],
+      ['-C', pluginAPath, 'clean', '-fdx'],
+    ], 'local source resets the checkout and cleans')
+  }
+  reinstallSpawns.length = 0
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'origin' }), res)
+    assert.equal(res.status, 200)
+    assert.deepEqual(reinstallSpawns, [
+      ['-C', pluginAPath, 'fetch', 'origin'],
+      ['-C', pluginAPath, 'reset', '--hard', 'origin/main'],
+      ['-C', pluginAPath, 'checkout', '-B', 'main'],
+      ['-C', pluginAPath, 'clean', '-fdx'],
+    ], 'remote source fetches, hard-resets to its default branch, and cleans')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'nowhere' }), res)
+    assert.equal(res.status, 400, 'unknown remote rejected')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-c' }), res)
+    assert.equal(res.status, 404, 'non-git local dir rejected')
+  }
+  {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', evil, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'origin' }), res)
+    assert.equal(res.status, 403)
+  }
+} finally {
+  delete process.env.DSH_RESTART_PROFILE
+  mod._resetGitInternals()
+}
+
+// a failing reinstall step aborts with its stderr
+{
+  const failSpawns = []
+  mod._setGitInternals({
+    spawn(bin, args) {
+      failSpawns.push(args)
+      return {
+        stdout: { on: () => {} },
+        stderr: { on: (ev, cb) => { if (ev === 'data') cb(Buffer.from('fatal: unable to access')) } },
+        on: (ev, cb) => { if (ev === 'close') setTimeout(() => cb(128), 5) },
+      }
+    },
+  })
+  process.env.DSH_RESTART_PROFILE = 'web2'
+  try {
+    const res = fakeRes()
+    await routes['/dsh-restart/reinstall'].handler(fakeReq('POST', local, '/dsh-restart/reinstall', { name: 'plugin-a', remote: 'origin' }), res)
+    assert.equal(res.status, 500)
+    assert.match(JSON.parse(res.body).error, /unable to access/)
+    assert.equal(JSON.parse(res.body).step, 'fetch', 'failing step reported')
+    assert.equal(failSpawns.length, 1, 'aborts after the first failing step')
+  } finally {
+    delete process.env.DSH_RESTART_PROFILE
+    mod._resetGitInternals()
+  }
+}
+
 // ---- helpers ------------------------------------------------------------------
 assert.equal(mod.dshPortFromArgs(['node', 'dsh', 'web', '--port', '3999']), 3999)
 assert.equal(mod.dshPortFromArgs(['node', 'dsh', 'web', '--port=4100']), 4100)
@@ -296,4 +596,4 @@ assert.equal(mod.dshPortFromArgs(['node', 'dsh', 'web']), 3080)
 assert.equal(mod.shellQuote("a'b"), "'a'\\''b'")
 
 rmSync(tmp, { recursive: true, force: true })
-console.log('host: state, toggle, restart (stubbed spawn/exit), community install (stubbed), trust guard, helpers — ok')
+console.log('host: state, toggle, restart (stubbed spawn/exit), community install (stubbed), git refs + checkout + uninstall + reinstall (stubbed), trust guard, helpers — ok')
