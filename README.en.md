@@ -1,13 +1,13 @@
 # dsh-restart
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) plugin that adds a **Settings → Restart** section: restart the `dsh web` process in one click, enable/disable installed plugins, and jump straight to the Community plugins tab to install more. Bilingual UI (English / Simplified Chinese) that follows the host's global language setting and switches live.
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) web-GUI plugin that adds a **Settings → Restart** section: restart the `dsh web` process in one click, enable/disable installed plugins, and jump straight to the Community plugins tab to install more. Bilingual UI (English / Simplified Chinese) that follows the host's global language setting and switches live.
 
 ## Features
 
 - **Restart dsh web** — one button restarts the host web process. The restarter is a detached helper that polls until the port is actually released (up to 20 s) before relaunching, so a slow-shutting-down old process cannot make the new one die with `EADDRINUSE`; the new instance inherits the original terminal's stdio and the page reloads itself once the server is back.
-- **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart. Plugins installed from a local checkout (`link:`/`file:` specs) additionally show git metadata when it is already present on disk — **local build** vs **local branch**, the current branch, the first remote's name/URL (e.g. `Local branch · origin/main · https://github.com/dujar/dsh-pocket.git`) — read from `.git` only, no network, worktrees included.
+- **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Enabled state shows as a status dot (green / gray), and every async action (restart, install, branch switch, uninstall, …) carries a spinner. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart. Plugins installed from a local checkout (`link:`/`file:` specs) additionally show git metadata when it is already present on disk — **local build** vs **local branch**, the current branch, the first remote's name/URL (e.g. `Local branch · origin/main · https://github.com/dujar/dsh-pocket.git`) — read from `.git` only, no network, worktrees included.
 - **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise the card advertises **dujar/dsh-community-plugin** with a one-click install (runs `dsh plugin --profile <p> add github:dujar/dsh-community-plugin`) and a link to the repository.
-- **Switch branches & reinstall** — local git checkouts get a git panel (⎇): switch branch across repos (Local / origin / upstream, with tracking retargeting for same-name branches) and a two-step-confirmed *Reinstall* that fresh-cleans the checkout from one of three sources: **Local** (`git reset --hard` + `git clean -fdx`), any of its own remotes (`fetch` + hard-reset to the default branch), or **Plugin (npm)** (runs `dsh plugin --profile <p> add <name>@latest`, replacing the `link:` spec — the checkout stays on disk but DSH loads the npm release after a restart; run `dsh plugin --profile <p> add link:<path>` to go back). Local/remote reinstalls automatically restore the checkout's runtime dependencies (`git clean -fdx` wipes node_modules; picked by lockfile — `package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, deps without a lockfile → npm) and auto-repair a broken link.
+- **Switch branches & reinstall** — local git checkouts get a git panel (⎇): switch branch across repos (Local / origin / upstream, with tracking retargeting for same-name branches). *Reinstall* sits in its own dashed-divider group; the button is neutral until the two-step confirmation, then turns red. Fresh-clean the checkout from one of three sources: **Local** (`git reset --hard` + `git clean -fdx`), any of its own remotes (`fetch` + hard-reset to the default branch), or **Plugin (npm)** (runs `dsh plugin --profile <p> add <name>@latest`, replacing the `link:` spec — the checkout stays on disk but DSH loads the npm release after a restart; run `dsh plugin --profile <p> add link:<path>` to go back). Local/remote reinstalls automatically restore the checkout's runtime dependencies (`git clean -fdx` wipes node_modules; picked by lockfile — `package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, deps without a lockfile → npm) and auto-repair a broken link.
 - **Link health & one-click repair** — state checks `node_modules/<plugin>` against its `link:`/`file:` manifest spec: a real directory, a missing entry, or a symlink pointing elsewhere shows a **Link broken — DSH is loading a stale copy** warning (the typical cause: a `dsh plugin add github:...` replaced the local link with a tarball copy). **Repair link** runs `dsh plugin --profile <p> install`, and pnpm re-materializes the symlink from the manifest and rewrites the lockfile.
 - **Uninstall** — every plugin row offers a two-step-confirmed removal from `dsh.profile.bundles` and `dependencies` (builtin packages are refused); files on disk stay untouched.
 - **Fail-closed trust guard** — all routes reuse the same-origin/localhost check shared with dsh-trader and dsh-community-plugins.
@@ -90,6 +90,23 @@ node --check lib/index.js && node --check lib/client.js
 - Client: `lib/client.js` (CJS factory + ModuleLoader; React comes from the host).
 - Host: `lib/index.js` (`ctx.webServer.register` mounts the routes).
 - i18n: `ctx.locale.register('restart', { zh, en })` — the host enforces zh/en key parity, so every new string must land in both dictionaries.
+
+## Structure
+
+```
+dsh-restart/
+  package.json         # manifest (dsh.bundle.patch / dsh.client declarations)
+  cordis.patch.yml     # host-half mount line (applied by the profile bundle mechanism)
+  lib/
+    index.js           # host half: restart scheduler + toggle/git-panel routes
+    client.js          # browser half: settings section UI (React, zero-build, i18n)
+  test/
+    host.test.mjs      # routes, trust guard, restart handoff
+    client.test.mjs    # bundle contract, dict key parity, pollRestart
+    render.test.mjs    # real-React server-side rendering
+  LICENSE
+  README.md
+```
 
 ## Publishing
 
