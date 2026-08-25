@@ -6,7 +6,7 @@
 
 - **Restart dsh web** — one button restarts the host web process. The restarter is a detached helper that polls until the port is actually released (up to 20 s) before relaunching, so a slow-shutting-down old process cannot make the new one die with `EADDRINUSE`; the new instance inherits the original terminal's stdio and the page reloads itself once the server is back.
 - **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Enabled state shows as a status dot (green / gray), and every async action (restart, install, branch switch, uninstall, …) carries a spinner. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart. Plugins installed from a local checkout (`link:`/`file:` specs) additionally show git metadata when it is already present on disk — **local build** vs **local branch**, the current branch, the first remote's name/URL (e.g. `Local branch · origin/main · https://github.com/dujar/dsh-pocket.git`) — read from `.git` only, no network, worktrees included.
-- **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise the card advertises **dujar/dsh-community-plugin** with a one-click install (runs `dsh plugin --profile <p> add github:dujar/dsh-community-plugin`) and a link to the repository.
+- **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise the card advertises **dujar/dsh-community-plugins** with a one-click install (runs `dsh plugin --profile <p> add github:dujar/dsh-community-plugins`) and a link to the repository.
 - **Switch branches & reinstall** — local git checkouts get a git panel (⎇): switch branch across repos (Local / origin / upstream, with tracking retargeting for same-name branches). *Reinstall* sits in its own dashed-divider group; the button is neutral until the two-step confirmation, then turns red. Fresh-clean the checkout from one of three sources: **Local** (`git reset --hard` + `git clean -fdx`), any of its own remotes (`fetch` + hard-reset to the default branch), or **Plugin (npm)** (runs `dsh plugin --profile <p> add <name>@latest`, replacing the `link:` spec — the checkout stays on disk but DSH loads the npm release after a restart; run `dsh plugin --profile <p> add link:<path>` to go back). Local/remote reinstalls automatically restore the checkout's runtime dependencies (`git clean -fdx` wipes node_modules; picked by lockfile — `package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, deps without a lockfile → npm) and auto-repair a broken link.
 - **Link health & one-click repair** — state checks `node_modules/<plugin>` against its `link:`/`file:` manifest spec: a real directory, a missing entry, or a symlink pointing elsewhere shows a **Link broken — DSH is loading a stale copy** warning (the typical cause: a `dsh plugin add github:...` replaced the local link with a tarball copy). **Repair link** runs `dsh plugin --profile <p> install`, and pnpm re-materializes the symlink from the manifest and rewrites the lockfile.
 - **Uninstall** — every plugin row offers a two-step-confirmed removal from `dsh.profile.bundles` and `dependencies` (builtin packages are refused); files on disk stay untouched.
@@ -38,8 +38,8 @@ The git panel — switch branch across repos (local / origin / upstream), and re
 # local checkout (development)
 dsh plugin --profile web add /path/to/dsh-restart
 
-# from a git remote (after publishing)
-dsh plugin --profile web add github:<you>/dsh-restart
+# from GitHub
+dsh plugin --profile web add github:dujar/dsh-restart
 ```
 
 Then **restart `dsh web`** and refresh the browser page. The install adds `dsh-restart` to the profile's `dsh.profile.bundles` automatically; if it is not added, append `"dsh-restart"` to that array in `$DSH_HOME/profiles/web/package.json` and restart. A **Restart** section then appears at the bottom of the Settings sidebar.
@@ -59,7 +59,7 @@ Then **restart `dsh web`** and refresh the browser page. The install adds `dsh-r
 | --- | --- | --- |
 | GET | `/dsh-restart/state` | profile, installed plugins (with enabled state, local git metadata, and link health), dsh-community-plugins availability |
 | POST | `/dsh-restart/plugin` | `{ name, enabled }` — add/remove a `dsh.profile.bundles` entry |
-| POST | `/dsh-restart/community` | one-click install of `github:dujar/dsh-community-plugin` (`DSH_BIN` overrides the executable) |
+| POST | `/dsh-restart/community` | one-click install of `github:dujar/dsh-community-plugins` (`DSH_BIN` overrides the executable) |
 | GET | `/dsh-restart/git-refs` | `?name=<plugin>` — branch + remote refs of a local checkout (no network) |
 | POST | `/dsh-restart/git-checkout` | `{ name, branch, remote }` — switch branch (repo-aware tracking) |
 | POST | `/dsh-restart/uninstall` | `{ name }` — remove the plugin from bundles + dependencies (builtins refused) |

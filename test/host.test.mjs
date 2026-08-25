@@ -68,7 +68,7 @@ const evil = { host: 'evil.example', origin: 'https://evil.example' }
   assert.equal(byName['dsh-community-plugins'].repo, null, 'link: specs carry no repo')
   assert.equal(byName['dsh-trader'].enabled, true)
   assert.equal(byName['dsh-trader'].repo, 'owner/dsh-trader', 'github: specs carry a repo')
-  assert.deepEqual(body.community, { installed: true, enabled: true, repo: 'dujar/dsh-community-plugin' })
+  assert.deepEqual(body.community, { installed: true, enabled: true, repo: 'dujar/dsh-community-plugins' })
 }
 
 // untrusted state read is rejected
@@ -173,19 +173,19 @@ mod._resetRestartInternals()
 const manifestPath = join(tmp, 'profiles', 'web', 'package.json')
 {
   const raw = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  raw.dsh.profile.bundles = raw.dsh.profile.bundles.map((n) => n === 'dsh-community-plugins' ? 'dsh-community-plugin' : n)
+  raw.dsh.profile.bundles = raw.dsh.profile.bundles.map((n) => n === 'dsh-community-plugins' ? 'dsh-community-plugins' : n)
   delete raw.dependencies['dsh-community-plugins']
-  raw.dependencies['dsh-community-plugin'] = 'github:dujar/dsh-community-plugin'
+  raw.dependencies['dsh-community-plugins'] = 'github:dujar/dsh-community-plugins'
   writeFileSync(manifestPath, JSON.stringify(raw, null, 2) + '\n')
   const res = fakeRes()
   await routes['/dsh-restart/state'].handler(fakeReq('GET', local), res)
   const body = JSON.parse(res.body)
-  assert.deepEqual(body.community, { installed: true, enabled: true, repo: 'dujar/dsh-community-plugin' })
-  assert.ok(body.plugins.some((p) => p.name === 'dsh-community-plugin' && p.repo === 'dujar/dsh-community-plugin'))
+  assert.deepEqual(body.community, { installed: true, enabled: true, repo: 'dujar/dsh-community-plugins' })
+  assert.ok(body.plugins.some((p) => p.name === 'dsh-community-plugins' && p.repo === 'dujar/dsh-community-plugins'))
   // restore the manifest for the later tests
   const back = JSON.parse(readFileSync(manifestPath, 'utf8'))
-  back.dsh.profile.bundles = back.dsh.profile.bundles.map((n) => n === 'dsh-community-plugin' ? 'dsh-community-plugins' : n)
-  delete back.dependencies['dsh-community-plugin']
+  back.dsh.profile.bundles = back.dsh.profile.bundles.map((n) => n === 'dsh-community-plugins' ? 'dsh-community-plugins' : n)
+  delete back.dependencies['dsh-community-plugins']
   back.dependencies['dsh-community-plugins'] = 'link:/home/bitslicer/dev/2026_work/projects/hermes/dsh-community-plugins'
   writeFileSync(manifestPath, JSON.stringify(back, null, 2) + '\n')
 }
@@ -218,7 +218,7 @@ process.env.DSH_BIN = 'dsh-test'
   assert.equal(body.output, 'installed ok')
   assert.ok(captured, 'spawn ran')
   assert.equal(captured.bin, 'dsh-test', 'DSH_BIN overrides the executable')
-  assert.deepEqual(captured.args, ['plugin', '--profile', 'web', 'add', 'github:dujar/dsh-community-plugin'])
+  assert.deepEqual(captured.args, ['plugin', '--profile', 'web', 'add', 'github:dujar/dsh-community-plugins'])
 }
 {
   // a failing install (e.g. repo not published yet) surfaces a 500 with stderr

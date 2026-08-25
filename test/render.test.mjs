@@ -72,7 +72,7 @@ assert.ok(html.includes('Installed plugins'), 'plugins card rendered')
 assert.ok(html.includes('More plugins'), 'more-plugins card rendered')
 assert.ok(html.includes('Restart now'), 'primary restart button rendered')
 assert.ok(html.includes('Loading…'), 'loading skeleton rendered before state arrives')
-assert.ok(html.includes('dujar/dsh-community-plugin'), 'advertised repo shown while community plugins are missing')
+assert.ok(html.includes('dujar/dsh-community-plugins'), 'advertised repo shown while community plugins are missing')
 assert.ok(html.includes('Install dsh-community-plugins'), 'one-click install button rendered')
 
 // The zh dict renders the same tree in Chinese.

@@ -6,7 +6,7 @@
 
 - **重启 dsh web** — 单个按钮重启宿主 web 进程。重启器为 detached 辅助进程，轮询等待端口真正释放（最长 20s）后再拉起新进程，避免旧进程退出慢导致新进程 `EADDRINUSE` 静默崩溃；新实例继承原终端的 stdio，服务恢复后页面自动重新加载。
 - **启停已安装插件** — 列出当前 profile 的全部第三方插件（`dsh.profile.bundles` 与 `dependencies` 的并集，排除 `@deepseek-ai/*` 与 `cordis:*` 内置项），每个插件一个开关，直接写入 profile 清单（`dsh.profile.bundles`），重启后生效。行首以状态点（绿色 / 灰色）显示启用状态，所有异步操作（重启、安装、切换分支、卸载等）均带加载指示。已改未重启的行显示「重启后生效」标记，通知栏提供一键重启。本地安装的插件（`link:`/`file:` 规格）额外显示磁盘上已存在的 git 信息 —— **本地构建** 或 **本地分支**、当前分支、首个远程的名称与地址（如 `本地分支 · origin/main · https://github.com/dujar/dsh-pocket.git`）—— 仅读取 `.git`，无网络请求，支持 worktree。
-- **更多插件** — 检测到 dsh-community-plugins 已安装并启用时，按钮直接跳转 **设置 → 插件 → 社区插件** 页；未安装时卡片广告 **dujar/dsh-community-plugin**，提供一键安装（执行 `dsh plugin --profile <p> add github:dujar/dsh-community-plugin`）与仓库链接。
+- **更多插件** — 检测到 dsh-community-plugins 已安装并启用时，按钮直接跳转 **设置 → 插件 → 社区插件** 页；未安装时卡片广告 **dujar/dsh-community-plugins**，提供一键安装（执行 `dsh plugin --profile <p> add github:dujar/dsh-community-plugins`）与仓库链接。
 - **切换分支与重装** — 本地 git 检出获得 Git 面板（⎇）：跨仓库（本地 / origin / upstream）切换分支（同名分支自动改设跟踪）；*重装* 为独立的虚线分组区域，二次确认前按钮为中性样式、确认后变为红色警示。来源三选一：**本地**（`git reset --hard` + `git clean -fdx`）、该插件自己的任一远程（fetch 后硬重置到默认分支）、或**插件源（npm）**（执行 `dsh plugin --profile <p> add <name>@latest`，替换 `link:` 规格 — 本地检出保留在磁盘，重启后加载 npm 发布版；想切回本地检出执行 `dsh plugin --profile <p> add link:<路径>`）。本地/远程重装后自动恢复检出的运行时依赖（`git clean -fdx` 会清掉 node_modules，按 `package-lock.json` → npm / `pnpm-lock.yaml` → pnpm / 有依赖无锁文件 → npm 自动选择装回），并在链接断开时自动修复。
 - **链接健康与一键修复** — state 检查 `node_modules/<插件>` 与 `link:`/`file:` 清单规格是否一致：真实目录 / 缺失 / 指向他处即显示「链接已断开 — DSH 正在加载旧副本」警告（典型场景：`dsh plugin add github:...` 把本地链接换成了 tarball 副本）。点 **修复链接** 执行 `dsh plugin --profile <p> install`，pnpm 依清单恢复符号链接并重写锁文件。
 - **卸载** — 每行插件提供二次确认的卸载，从 `dsh.profile.bundles` 与 `dependencies` 移除（内置包拒绝）；磁盘文件保留不动。
@@ -38,8 +38,8 @@ Git 面板 — 跨仓库（本地 / origin / upstream）切换分支，并可从
 # 本地开发
 dsh plugin --profile web add /path/to/dsh-restart
 
-# 发布后从远端安装
-dsh plugin --profile web add github:<you>/dsh-restart
+# 从 GitHub 安装
+dsh plugin --profile web add github:dujar/dsh-restart
 ```
 
 然后**重启 `dsh web`** 并刷新浏览器页面。安装会自动把 `dsh-restart` 加入 profile 的 `dsh.profile.bundles`；若未加入，请手动把 `"dsh-restart"` 追加到 `$DSH_HOME/profiles/web/package.json` 的该数组并重启。设置侧边栏底部即出现「重启」分区。
@@ -59,7 +59,7 @@ dsh plugin --profile web add github:<you>/dsh-restart
 | --- | --- | --- |
 | GET | `/dsh-restart/state` | profile、已安装插件列表（含 enabled、本地 git 元信息与链接健康）、dsh-community-plugins 可用性 |
 | POST | `/dsh-restart/plugin` | `{ name, enabled }` — 增删 `dsh.profile.bundles` 成员 |
-| POST | `/dsh-restart/community` | 一键安装 `github:dujar/dsh-community-plugin`（`DSH_BIN` 可覆盖可执行文件） |
+| POST | `/dsh-restart/community` | 一键安装 `github:dujar/dsh-community-plugins`（`DSH_BIN` 可覆盖可执行文件） |
 | GET | `/dsh-restart/git-refs` | `?name=<插件>` — 本地检出的分支与远程引用（无网络） |
 | POST | `/dsh-restart/git-checkout` | `{ name, branch, remote }` — 切换分支（按仓库调整跟踪） |
 | POST | `/dsh-restart/uninstall` | `{ name }` — 从 bundles 与 dependencies 移除（内置包拒绝） |
