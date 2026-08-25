@@ -66,6 +66,14 @@
   ],
   "license": "MIT",
   "author": "bitslicer",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dujar/dsh-restart.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dujar/dsh-restart/issues"
+  },
+  "homepage": "https://github.com/dujar/dsh-restart#readme",
   "engines": {
     "node": ">=20"
   },

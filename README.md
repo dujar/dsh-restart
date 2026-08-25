@@ -1,117 +1,120 @@
 # dsh-restart
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）web-GUI 插件：在 **设置 → 重启** 中一键重启 `dsh web` 进程、开关已安装插件，并直接跳转社区插件页安装更多。中英双语界面（跟随宿主全局语言，zh / en，实时切换）。
+English | [简体中文](README.zh-CN.md)
 
-## 功能
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) web-GUI plugin that adds a **Settings → Restart** section: restart the `dsh web` process in one click, enable/disable installed plugins, and jump straight to the Community plugins tab to install more. Bilingual UI (English / Simplified Chinese) that follows the host's global language setting and switches live.
 
-- **重启 dsh web** — 单个按钮重启宿主 web 进程。重启器为 detached 辅助进程，轮询等待端口真正释放（最长 20s）后再拉起新进程，避免旧进程退出慢导致新进程 `EADDRINUSE` 静默崩溃；新实例继承原终端的 stdio，服务恢复后页面自动重新加载。
-- **启停已安装插件** — 列出当前 profile 的全部第三方插件（`dsh.profile.bundles` 与 `dependencies` 的并集，排除 `@deepseek-ai/*` 与 `cordis:*` 内置项），每个插件一个开关，直接写入 profile 清单（`dsh.profile.bundles`），重启后生效。行首以状态点（绿色 / 灰色）显示启用状态，所有异步操作（重启、安装、切换分支、卸载等）均带加载指示。已改未重启的行显示「重启后生效」标记，通知栏提供一键重启。本地安装的插件（`link:`/`file:` 规格）额外显示磁盘上已存在的 git 信息 —— **本地构建** 或 **本地分支**、当前分支、首个远程的名称与地址（如 `本地分支 · origin/main · https://github.com/dujar/dsh-pocket.git`）—— 仅读取 `.git`，无网络请求，支持 worktree。
-- **更多插件** — 检测到 dsh-community-plugins 已安装并启用时，按钮直接跳转 **设置 → 插件 → 社区插件** 页；未安装时卡片广告 **dujar/dsh-community-plugins**，提供一键安装（执行 `dsh plugin --profile <p> add github:dujar/dsh-community-plugins`）与仓库链接。
-- **切换分支与重装** — 本地 git 检出获得 Git 面板（⎇）：跨仓库（本地 / origin / upstream）切换分支（同名分支自动改设跟踪）；*重装* 为独立的虚线分组区域，二次确认前按钮为中性样式、确认后变为红色警示。来源三选一：**本地**（`git reset --hard` + `git clean -fdx`）、该插件自己的任一远程（fetch 后硬重置到默认分支）、或**插件源（npm）**（执行 `dsh plugin --profile <p> add <name>@latest`，替换 `link:` 规格 — 本地检出保留在磁盘，重启后加载 npm 发布版；想切回本地检出执行 `dsh plugin --profile <p> add link:<路径>`）。本地/远程重装后自动恢复检出的运行时依赖（`git clean -fdx` 会清掉 node_modules，按 `package-lock.json` → npm / `pnpm-lock.yaml` → pnpm / 有依赖无锁文件 → npm 自动选择装回），并在链接断开时自动修复。
-- **链接健康与一键修复** — state 检查 `node_modules/<插件>` 与 `link:`/`file:` 清单规格是否一致：真实目录 / 缺失 / 指向他处即显示「链接已断开 — DSH 正在加载旧副本」警告（典型场景：`dsh plugin add github:...` 把本地链接换成了 tarball 副本）。点 **修复链接** 执行 `dsh plugin --profile <p> install`，pnpm 依清单恢复符号链接并重写锁文件。
-- **卸载** — 每行插件提供二次确认的卸载，从 `dsh.profile.bundles` 与 `dependencies` 移除（内置包拒绝）；磁盘文件保留不动。
-- **fail-closed 信任校验** — 所有路由沿用 dsh-trader / dsh-community-plugins 的同源/localhost 校验。
+## Features
 
-## 截图
+- **Restart dsh web** — one button restarts the host web process. The restarter is a detached helper that polls until the port is actually released (up to 20 s) before relaunching, so a slow-shutting-down old process cannot make the new one die with `EADDRINUSE`; the new instance inherits the original terminal's stdio and the page reloads itself once the server is back.
+- **Enable / disable installed plugins** — lists every third-party plugin of the active profile (union of `dsh.profile.bundles` and `dependencies`, excluding `@deepseek-ai/*` and `cordis:*` built-ins) with a toggle per plugin that edits the profile manifest (`dsh.profile.bundles`); changes apply after a restart. Enabled state shows as a status dot (green / gray), and every async action (restart, install, branch switch, uninstall, …) carries a spinner. Rows with a pending change show a **Restart to apply** chip, and a notice bar offers a one-click restart. Plugins installed from a local checkout (`link:`/`file:` specs) additionally show git metadata when it is already present on disk — **local build** vs **local branch**, the current branch, the first remote's name/URL (e.g. `Local branch · origin/main · https://github.com/dujar/dsh-pocket.git`) — read from `.git` only, no network, worktrees included.
+- **More plugins** — when dsh-community-plugins is installed and enabled, a button jumps straight to **Settings → Plugins → Community plugins**; otherwise the card advertises **dujar/dsh-community-plugins** with a one-click install (runs `dsh plugin --profile <p> add github:dujar/dsh-community-plugins`) and a link to the repository.
+- **Switch branches & reinstall** — local git checkouts get a git panel (⎇): switch branch across repos (Local / origin / upstream, with tracking retargeting for same-name branches). *Reinstall* sits in its own dashed-divider group; the button is neutral until the two-step confirmation, then turns red. Fresh-clean the checkout from one of three sources: **Local** (`git reset --hard` + `git clean -fdx`), any of its own remotes (`fetch` + hard-reset to the default branch), or **Plugin (npm)** (runs `dsh plugin --profile <p> add <name>@latest`, replacing the `link:` spec — the checkout stays on disk but DSH loads the npm release after a restart; run `dsh plugin --profile <p> add link:<path>` to go back). Local/remote reinstalls automatically restore the checkout's runtime dependencies (`git clean -fdx` wipes node_modules; picked by lockfile — `package-lock.json` → npm, `pnpm-lock.yaml` → pnpm, deps without a lockfile → npm) and auto-repair a broken link.
+- **Link health & one-click repair** — state checks `node_modules/<plugin>` against its `link:`/`file:` manifest spec: a real directory, a missing entry, or a symlink pointing elsewhere shows a **Link broken — DSH is loading a stale copy** warning (the typical cause: a `dsh plugin add github:...` replaced the local link with a tarball copy). **Repair link** runs `dsh plugin --profile <p> install`, and pnpm re-materializes the symlink from the manifest and rewrites the lockfile.
+- **Uninstall** — every plugin row offers a two-step-confirmed removal from `dsh.profile.bundles` and `dependencies` (builtin packages are refused); files on disk stay untouched.
+- **Fail-closed trust guard** — all routes reuse the same-origin/localhost check shared with dsh-trader and dsh-community-plugins.
 
-设置 → 重启 分区（中文界面）：
+## Screenshots
 
-![重启分区](screenshots/zh/section.png)
+Settings → Restart section (English):
 
-切换插件开关后显示待生效状态与重启快捷入口：
+![Restart section](screenshots/en/section.png)
 
-![待生效状态](screenshots/zh/pending.png)
+Toggling a plugin shows the pending state and a restart shortcut:
 
-「浏览更多插件」跳转社区插件页：
+![Pending change](screenshots/en/pending.png)
 
-![社区插件跳转](screenshots/zh/community.png)
+The *More plugins* button redirects in-app to the Community plugins tab:
 
-Git 面板 — 跨仓库（本地 / origin / upstream）切换分支，并可从同一来源重装（全新清理）：
+![Community plugins redirect](screenshots/en/community.png)
 
-![Git 面板](screenshots/zh/git.png)
+The git panel — switch branch across repos (local / origin / upstream), and reinstall (fresh cleanup) from the same sources:
 
-## 安装
+![Git panel](screenshots/en/git.png)
 
-> 需要 Node.js 22.19+ 与 pnpm（`dsh plugin` 底层通过 pnpm 安装）。
+## Install
+
+> Requires Node.js 22.19+ and pnpm (`dsh plugin` installs through pnpm under the hood).
 
 ```sh
-# 本地开发
+# local checkout (development)
 dsh plugin --profile web add /path/to/dsh-restart
 
-# 从 GitHub 安装
+# from GitHub
 dsh plugin --profile web add github:dujar/dsh-restart
 ```
 
-然后**重启 `dsh web`** 并刷新浏览器页面。安装会自动把 `dsh-restart` 加入 profile 的 `dsh.profile.bundles`；若未加入，请手动把 `"dsh-restart"` 追加到 `$DSH_HOME/profiles/web/package.json` 的该数组并重启。设置侧边栏底部即出现「重启」分区。
+Then **restart `dsh web`** and refresh the browser page. The install adds `dsh-restart` to the profile's `dsh.profile.bundles` automatically; if it is not added, append `"dsh-restart"` to that array in `$DSH_HOME/profiles/web/package.json` and restart. A **Restart** section then appears at the bottom of the Settings sidebar.
 
-## 使用
+## Usage
 
-1. 打开 **设置 → 重启**。
-2. **立即重启** 重启 dsh web 进程；新实例就绪后页面自动重新加载。
-3. 切换任意插件的开关以挂载/卸载 — profile 清单立即更新，重启后生效。「重启后生效」标记与通知栏的 *重启* 按钮会明确提示当前待生效的更改。
-4. **浏览更多插件** 打开 **设置 → 插件 → 社区插件**，可搜索并从社区目录安装（由 dsh-community-plugins 提供）。
-5. 本地检出插件可点 **⎇ 切换分支** 打开 Git 面板：选择仓库（本地 / 各远程）与分支 — 从不同仓库选择同名分支会改设跟踪（`git branch --set-upstream-to` / `--unset-upstream`）而非无效操作。下方的 **重装** 行即全新清理，来源三选一（均需二次确认）：*本地* 丢弃全部本地改动与未跟踪文件（`git reset --hard` + `git clean -fdx`），远程则 fetch 后硬重置到该远程默认分支，*插件源（npm）* 则从注册表重装最新版（`dsh plugin add <name>@latest`，本地检出保留在磁盘但不再被加载）。本地/远程重装会自动把 `git clean -fdx` 清掉的 node_modules 装回检出，并在链接断开时自动修复。链接健康状态显示在每行：出现「链接已断开」警告时点 **修复链接** 即可恢复。
-6. **卸载**（行尾）将该插件从 `dsh.profile.bundles` 与 `dependencies` 移除 — 重启后生效；磁盘上的检出文件保留不动。
+1. Open **Settings → Restart**.
+2. **Restart now** restarts the dsh web process; the page reloads once the new instance answers.
+3. Toggle any plugin to mount/unmount it — the profile manifest is updated immediately, and the change is applied after a restart. The **Restart to apply** chip and the notice bar's *Restart* button show you exactly what is pending.
+4. **Browse more plugins** opens **Settings → Plugins → Community plugins**, where you can search and install from the community catalog (via dsh-community-plugins).
+5. For local checkouts, **⎇ Switch branch** opens the git panel: pick a repo (Local / each remote) and a branch — the same branch name from a different repo retargets tracking (`git branch --set-upstream-to` / `--unset-upstream`) instead of being a no-op. The **Reinstall** row below it is a fresh cleanup from one of three sources (all two-step confirmed): *Local* discards every local change and untracked file (`git reset --hard` + `git clean -fdx`), a remote fetches and hard-resets the checkout to that remote's default branch, and *Plugin (npm)* reinstalls the latest release from the registry (`dsh plugin add <name>@latest` — the local checkout stays on disk but stops being loaded). Local/remote reinstalls automatically restore the node_modules that `git clean -fdx` wiped and repair a broken link. Link health shows per row: when the **Link broken** warning appears, click **Repair link** to fix it.
+6. **Uninstall** (row meta) removes the plugin from `dsh.profile.bundles` and `dependencies` — restart to apply; the checkout files on disk are left untouched.
 
-## 路由（宿主半）
+## Host routes
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/dsh-restart/state` | profile、已安装插件列表（含 enabled、本地 git 元信息与链接健康）、dsh-community-plugins 可用性 |
-| POST | `/dsh-restart/plugin` | `{ name, enabled }` — 增删 `dsh.profile.bundles` 成员 |
-| POST | `/dsh-restart/community` | 一键安装 `github:dujar/dsh-community-plugins`（`DSH_BIN` 可覆盖可执行文件） |
-| GET | `/dsh-restart/git-refs` | `?name=<插件>` — 本地检出的分支与远程引用（无网络） |
-| POST | `/dsh-restart/git-checkout` | `{ name, branch, remote }` — 切换分支（按仓库调整跟踪） |
-| POST | `/dsh-restart/uninstall` | `{ name }` — 从 bundles 与 dependencies 移除（内置包拒绝） |
-| POST | `/dsh-restart/relink` | `{ name }` — 重新同步 profile 安装，恢复被覆盖的 `link:`/`file:` 依赖符号链接 |
-| POST | `/dsh-restart/reinstall` | `{ name, remote }` — 全新清理本地检出（本地或该插件自己的 git 远程；`remote: "plugin"` 改为从注册表重装并解链）；完成后恢复检出依赖并修复断开的链接 |
-| POST | `/dsh-restart` | 调度自重启；先返回 `{ ok, restarting }`，约 400 ms 后进程退出 |
+| GET | `/dsh-restart/state` | profile, installed plugins (with enabled state, local git metadata, and link health), dsh-community-plugins availability |
+| POST | `/dsh-restart/plugin` | `{ name, enabled }` — add/remove a `dsh.profile.bundles` entry |
+| POST | `/dsh-restart/community` | one-click install of `github:dujar/dsh-community-plugins` (`DSH_BIN` overrides the executable) |
+| GET | `/dsh-restart/git-refs` | `?name=<plugin>` — branch + remote refs of a local checkout (no network) |
+| POST | `/dsh-restart/git-checkout` | `{ name, branch, remote }` — switch branch (repo-aware tracking) |
+| POST | `/dsh-restart/uninstall` | `{ name }` — remove the plugin from bundles + dependencies (builtins refused) |
+| POST | `/dsh-restart/relink` | `{ name }` — re-sync the profile install so a clobbered `link:`/`file:` dep points at its checkout again |
+| POST | `/dsh-restart/reinstall` | `{ name, remote }` — fresh-clean a local checkout (Local, or its own git remote; `remote: "plugin"` re-adds from the registry and de-links); then restore the checkout's dependencies and repair a broken link |
+| POST | `/dsh-restart` | schedule a self-restart; responds `{ ok, restarting }`, then the process exits ~400 ms later |
 
-所有路由使用与 dsh-trader / dsh-community-plugins 相同的 fail-closed 同源/localhost 信任校验：跨源或异常的 `Origin`/`Referer` 一律拒绝，CORS-simple 类型拒绝，仅当 Host 为 localhost 时才视为可信。
+All routes use the fail-closed same-origin/localhost trust check shared with dsh-trader and dsh-community-plugins: a cross-origin or malformed `Origin`/`Referer` rejects, a CORS-simple content type rejects, and only then does a localhost host count as trusted.
 
-## 配置
+## Configuration
 
-环境变量（均可选）：
+Environment variables (all optional):
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `DSH_RESTART_CMD` | 原启动命令行 | 自定义重启命令（如 `systemctl restart dsh-web`），用于 systemd 等托管场景。 |
-| `DSH_RESTART_PROFILE` | 自动检测 | 指定 profile；回退 `DSH_PROFILE` → 自动检测挂载本插件的 profile → `web`。 |
+| `DSH_RESTART_CMD` | original command line | Custom restart command (e.g. `systemctl restart dsh-web`) for supervised setups. |
+| `DSH_RESTART_PROFILE` | auto-detected | Explicit profile; falls back to `DSH_PROFILE`, then auto-detection of the profile that mounted this plugin, then `web`. |
 
-## 开发
+## Development
 
-零构建插件（同 dsh-community-plugins / dsh-better-archive 模式）：
+Zero-build plugin (same pattern as dsh-community-plugins / dsh-better-archive):
 
 ```sh
-npm test          # host 路由 + client 契约/字典平衡 + 真实 React 服务端渲染
+npm test          # host routes + client contract/dict balance + real-React SSR
 node --check lib/index.js && node --check lib/client.js
 ```
 
-- 客户端：`lib/client.js`（CJS factory + ModuleLoader，React 来自宿主）。
-- 宿主：`lib/index.js`（`ctx.webServer.register` 挂载路由）。
-- i18n：`ctx.locale.register('restart', { zh, en })` — 宿主强制 zh/en 键对等，新增文案必须同时加两个字典。
+- Client: `lib/client.js` (CJS factory + ModuleLoader; React comes from the host).
+- Host: `lib/index.js` (`ctx.webServer.register` mounts the routes).
+- i18n: `ctx.locale.register('restart', { zh, en })` — the host enforces zh/en key parity, so every new string must land in both dictionaries.
 
-## 项目结构
+## Structure
 
 ```
 dsh-restart/
-  package.json         # manifest（dsh.bundle.patch / dsh.client 声明）
-  cordis.patch.yml     # 宿主半挂载行（由 profile bundle 机制应用）
+  package.json         # manifest (dsh.bundle.patch / dsh.client declarations)
+  cordis.patch.yml     # host-half mount line (applied by the profile bundle mechanism)
   lib/
-    index.js           # 宿主半：重启调度 + 插件开关 / Git 面板路由
-    client.js          # 浏览器半：设置分区 UI（React，零构建，双语）
+    index.js           # host half: restart scheduler + toggle/git-panel routes
+    client.js          # browser half: settings section UI (React, zero-build, i18n)
   test/
-    host.test.mjs      # 路由、信任校验、重启交接
-    client.test.mjs    # bundle 契约、字典键对等、pollRestart
-    render.test.mjs    # 真实 React 服务端渲染
+    host.test.mjs      # routes, trust guard, restart handoff
+    client.test.mjs    # bundle contract, dict key parity, pollRestart
+    render.test.mjs    # real-React server-side rendering
   LICENSE
-  README.md
+  README.md           # English (this file)
+  README.zh-CN.md     # Simplified Chinese
 ```
 
-## 发布
+## Publishing
 
-发布到 GitHub 前，请为仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 主题标签，以便在社区目录中被发现（DeepSeek Harness 官方 README 的要求）。
+Before publishing your fork to GitHub: add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to the repository for discoverability in the community catalog (per the DeepSeek Harness README).
 
-## 许可
+## License
 
 [MIT](./LICENSE)
